@@ -199,7 +199,7 @@ namespace EmailAlerts
 
                 model.CardComment = card.CardData.Comment;
 
-                model.CardUrl = string.Concat(model.GeminiUrl, "workspace/", card.Id, card.Url);
+                model.CardUrl = string.Concat(model.GeminiUrl, "workspace/", card.Id, '/', card.Url);
 
                 // Safety check!
                 if (model.ChangeCount > 0)
