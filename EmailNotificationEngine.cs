@@ -341,7 +341,12 @@ namespace EmailAlerts
                 navigationCardsManager.Update(card, false, false);
             }
 
-            if(refreshCache) navigationCardsManager.Cache.NavigationCards.Invalidate();
+            if (refreshCache)
+            {
+                navigationCardsManager.Cache.NavigationCards.Invalidate();
+                var webNodes = GeminiApp.Container.Resolve<IWebNodes>();
+                webNodes.AddDataOnAllNodesButMe(new WebNodeData() { NodeGuid = GeminiApp.GUID, Key = "cache", Value = navigationCardsManager.Cache.NavigationCards.CacheKey });
+            }
         }
 
         private void ProcessWatcherAlerts()
