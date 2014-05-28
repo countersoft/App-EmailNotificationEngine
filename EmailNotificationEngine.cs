@@ -402,6 +402,7 @@ namespace EmailAlerts
             Dictionary<int, WatcherData> targets = new Dictionary<int, WatcherData>();
 
             var userManager = new UserManager(_issueManager);
+            List<int> projectsMissingFollowerTemplate = new List<int>();
 
             // Build array of users that are watching issues
             foreach (var issue in issues)
@@ -455,9 +456,12 @@ namespace EmailAlerts
 
             // Now loop through users sending them watcher summary email
             Dictionary<int, List<IssueCommentDto>> originalComments = new Dictionary<int, List<IssueCommentDto>>();
-
+            List<int> processedProjects;
+            
             foreach (var target in targets)
             {
+                processedProjects = new List<int>();
+
                 if (originalComments.Count > 0)
                 {
                     foreach (var kv in originalComments)
@@ -520,20 +524,87 @@ namespace EmailAlerts
                 // Safety check!
                 if (model.ChangeCount > 0)
                 {
-                    // Find email template to use (NOT PROJECT SPECIFIC)
-                    AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, 0);
+                    var watcherAlertTemplates = alerts.Templates.FindAll(s => s.AlertType == AlertTemplateType.Watchers);
 
-                    // Generate email template
-                    string html = alerts.GenerateHtml(template, model);
+                    if (watcherAlertTemplates.Count == 0)
+                    {
+                        LogDebugMessage("No follower notification template found");
+                        continue;
+                    }
 
-                    if (GeminiApp.GeminiLicense.IsFree) html = alerts.AddSignature(html);
+                    if (!watcherAlertTemplates.Any(p => p.GetAssociatedProjectValue().IsEmpty()))
+                    {
+                        List<Project> allItemProjects = model.TheItemsUpdated.Select(s => s.Project).ToList();
+                        allItemProjects = allItemProjects.Where(s => !watcherAlertTemplates.Any(a => a.GetAssociatedProjects().Contains(s.Id))).ToList();
 
-                    string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, model, true) : string.Format("{0} {1}", model.ChangeCount, "Gemini Updates");
+                        if (projectsMissingFollowerTemplate.Count > 0)
+                        {
+                            allItemProjects = allItemProjects.Where(s => !projectsMissingFollowerTemplate.Contains(s.Id)).ToList();
+                        }
 
-                    // Send email
-                    string log;
+                        if (allItemProjects.Count > 0)
+                        {
+                            LogDebugMessage(string.Concat("No follower notification template found for project ", string.Join(", ", allItemProjects.Select(s => s.Name).Distinct())));
+                            projectsMissingFollowerTemplate.AddRange(allItemProjects.Select(s => s.Id).Distinct());
+                        }
+                    }
 
-                    EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Entity.Fullname, true, out log);
+                    watcherAlertTemplates.Sort((x, y) => y.GetAssociatedProjectValue().CompareTo(x.GetAssociatedProjectValue()));
+
+                    foreach(var watcherTemplate in watcherAlertTemplates)
+                    {
+                        var allTemplateProjects = watcherTemplate.GetAssociatedProjects();
+
+                        var issuesTemplate = allTemplateProjects.Count == 0 ? model.TheItemsUpdated : model.TheItemsUpdated.FindAll(s => allTemplateProjects.Contains(s.Entity.ProjectId));
+
+                        if (issuesTemplate.Count == 0) continue;
+
+                        var projectIds = issuesTemplate.Select(s => s.Entity.ProjectId).Distinct();
+
+                        if (processedProjects.Count > 0)
+                        {
+                            projectIds = projectIds.Where(s => !processedProjects.Contains(s));
+                            issuesTemplate = issuesTemplate.Where(s => !processedProjects.Contains(s.Entity.ProjectId)).ToList();
+                        }
+
+                        if (processedProjects.Contains(0) || projectIds.Count() == 0 || issuesTemplate.Count == 0) continue;
+
+                        AlertTypeWatchersTemplateModel projectTemplateModel = new AlertTypeWatchersTemplateModel();
+
+                        projectTemplateModel.TheItemsUpdated.AddRange(issuesTemplate);
+                        projectTemplateModel.TheRecipient = model.TheRecipient;
+                        projectTemplateModel.Version = model.Version;
+                        projectTemplateModel.GeminiUrl = model.GeminiUrl;
+
+                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, issuesTemplate.First().Entity.ProjectId);
+
+                        if (template.Id == 0)
+                        {
+                            
+                            continue;
+                        }
+
+                        // Generate email template
+                        string html = alerts.GenerateHtml(template, projectTemplateModel);
+
+                        if (GeminiApp.GeminiLicense.IsFree) html = alerts.AddSignature(html);
+
+                        string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, projectTemplateModel, true) : string.Format("{0} {1}", projectTemplateModel.ChangeCount, "Gemini Updates");
+
+                        // Send email
+                        string log;
+
+                        EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Entity.Fullname, true, out log);
+
+                        if (allTemplateProjects.Count == 0)
+                        {
+                            processedProjects.Add(0);
+                        }
+                        else
+                        {
+                            processedProjects.AddRange(projectIds);
+                        }
+                    }
                 }
             }
         }       
