@@ -408,6 +408,7 @@ namespace EmailAlerts
             foreach (var issue in issues)
             {
                 //Safety check
+                if (issue.Watchers.Count == 0) continue;
                 if (issue.Revised.ToUtc(_issueManager.UserContext.User.TimeZone) <= lastChecked) continue;
 
                 var history = _issueManager.GetHistory(issue);
@@ -516,10 +517,51 @@ namespace EmailAlerts
                             break;
                         }
                     }
+
                     if (issue.ChangeLog.Count == 0) continue;
 
-                    model.TheItemsUpdated.Add(issue);
+                    if (recipient.User.GetSettings().IndividualFollowerAlerts)
+                    {
+                        var template = alerts.FindTemplateForProject(AlertTemplateType.Updated, issue.Entity.ProjectId);
+
+                        if (template == null)
+                        {
+                            LogDebugMessage("No update notification template found");
+                            continue;
+                        }
+
+                        var indModel = new AlertTypeIndividualTemplateModel();
+
+                        indModel.GeminiUrl = model.GeminiUrl;
+
+                        indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id);
+
+                        indModel.TheItem = issue;
+
+                        indModel.TheRecipient = recipient.User;
+
+                        indModel.Version = GeminiVersion.Version;
+
+                        indModel.IsNewItem = false;
+
+                        string html = alerts.GenerateHtml(template, indModel);
+
+                        if (GeminiApp.GeminiLicense.IsFree) html = alerts.AddSignature(html);
+
+                        string log;
+
+                        string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] - {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
+
+                        EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Fullname, true, out log);
+                    }
+                    else
+                    {
+                        model.TheItemsUpdated.Add(issue);
+                    }
+                    
                 }
+
+                if (recipient.User.GetSettings().IndividualFollowerAlerts) continue;
 
                 // Safety check!
                 if (model.ChangeCount > 0)
