@@ -262,7 +262,7 @@ namespace EmailAlerts
                                 // Send email
                                 string log;
 
-                                string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] - {1} {2} ({3})", issue.IssueKey, issue.Type, model.TheItemsCreated.Contains(issue) ? "Created" : "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
+                                string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] {1} {2} ({3})", issue.IssueKey, issue.Type, model.TheItemsCreated.Contains(issue) ? "Created" : "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
 
                                 EmailHelper.Send(_issueManager.UserContext.Config, subject, html, user.Entity.Email, user.Fullname, true, out log);
 
@@ -550,7 +550,7 @@ namespace EmailAlerts
 
                         string log;
 
-                        string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] - {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
+                        string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
 
                         EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Fullname, true, out log);
                     }
