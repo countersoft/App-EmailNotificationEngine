@@ -18,6 +18,7 @@ using Countersoft.Gemini.Mailer;
 using Microsoft.Practices.Unity;
 using Countersoft.Gemini.Extensibility.Apps;
 using Countersoft.Gemini;
+using Countersoft.Gemini.Commons.Entity.Security;
 
 namespace EmailAlerts
 {
@@ -32,6 +33,8 @@ namespace EmailAlerts
         private List<IssueTypeDto> _types;
 
         private List<PermissionSetDto> _permissionSets;
+
+        private List<Organization> _organizations;
 
         private IssueManager _issueManager;
 
@@ -50,6 +53,8 @@ namespace EmailAlerts
             _types = new MetaManager(issueManager).TypeGetAll();
 
             _permissionSets = new PermissionSetManager(issueManager).GetAll();
+
+            _organizations = new OrganizationManager(issueManager).GetAll();
 
             ProcessAppNavCardAlerts();
 
@@ -145,8 +150,8 @@ namespace EmailAlerts
                     string dupeKey = string.Format("{0}-{1}-{2}", recepient.Entity.Id, issueId, card.Id);
 
                     if (issuesEmailedToUsers.Contains(dupeKey)) continue;
-                    
-                    var permissionManager = new PermissionsManager(recepient, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+
+                    var permissionManager = new PermissionsManager(recepient, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                     if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
 
@@ -222,7 +227,7 @@ namespace EmailAlerts
 
                                 if (user != recepient)
                                 {
-                                    var permissionManager = new PermissionsManager(user, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                                    var permissionManager = new PermissionsManager(user, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                                     if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
 
@@ -293,7 +298,7 @@ namespace EmailAlerts
 
                             if (user != recepient)
                             {
-                                var permissionManager = new PermissionsManager(user, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                                var permissionManager = new PermissionsManager(user, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                                 model.TheItemsCreated.RemoveAll(i => !permissionManager.CanSeeItem(i.Project, i));
 
@@ -423,7 +428,7 @@ namespace EmailAlerts
                     {
                         WatcherData data = targets[watcher.Entity.UserId];
 
-                        var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                        var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                         if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
 
@@ -439,7 +444,7 @@ namespace EmailAlerts
 
                         if (data.User.Entity.Active)
                         {
-                            var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                            var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                             if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
 
@@ -500,7 +505,7 @@ namespace EmailAlerts
 
                     issue.ChangeLog = _issueManager.GetChangeLog(issue, _issueManager.UserContext.User, recipient.User, lastCheckedLocal);
 
-                    var permissionManager = new PermissionsManager(recipient.User, _types, _permissionSets, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                    var permissionManager = new PermissionsManager(recipient.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                     foreach (var comment in issue.Comments)
                     {
