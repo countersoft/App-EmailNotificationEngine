@@ -414,6 +414,7 @@ namespace EmailAlerts
             {
                 //Safety check
                 if (issue.Watchers.Count == 0) continue;
+                if (issue.Revised == issue.Created) continue;
                 if (issue.Revised.ToUtc(_issueManager.UserContext.User.TimeZone) <= lastChecked) continue;
 
                 var history = _issueManager.GetHistory(issue);
