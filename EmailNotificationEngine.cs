@@ -405,10 +405,11 @@ namespace EmailAlerts
             var lastCheckedLocal = lastChecked.ToLocal(_issueManager.UserContext.User.TimeZone);
 
             Dictionary<int, WatcherData> targets = new Dictionary<int, WatcherData>();
-
+            Dictionary<string, WatcherData> emailTargets = new Dictionary<string, WatcherData>();
             var userManager = new UserManager(_issueManager);
             List<int> projectsMissingFollowerTemplate = new List<int>();
-
+            int emailWatchers = -3;
+            
             // Build array of users that are watching issues
             foreach (var issue in issues)
             {
@@ -425,26 +426,12 @@ namespace EmailAlerts
 
                 foreach (var watcher in issue.Watchers)
                 {
-                    if (targets.ContainsKey(watcher.Entity.UserId))
+                    if (watcher.Entity.UserId != null)
                     {
-                        WatcherData data = targets[watcher.Entity.UserId];
-
-                        var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
-
-                        if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
-
-                        if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id)) continue;
-
-                        data.IssueId.Add(issue.Entity.Id);
-                    }
-                    else
-                    {
-                        WatcherData data = new WatcherData();
-
-                        data.User = userManager.Get(watcher.Entity.UserId);
-
-                        if (data.User.Entity.Active)
+                        if (targets.ContainsKey(watcher.Entity.UserId.Value))
                         {
+                            WatcherData data = targets[watcher.Entity.UserId.Value];
+
                             var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
                             if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
@@ -452,8 +439,53 @@ namespace EmailAlerts
                             if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id)) continue;
 
                             data.IssueId.Add(issue.Entity.Id);
+                        }
+                        else
+                        {
+                            WatcherData data = new WatcherData();
 
-                            targets.Add(watcher.Entity.UserId, data);
+                            data.User = userManager.Get(watcher.Entity.UserId.Value);
+
+                            if (data.User.Entity.Active)
+                            {
+                                var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+
+                                if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
+
+                                if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id)) continue;
+
+                                data.IssueId.Add(issue.Entity.Id);
+
+                                targets.Add(watcher.Entity.UserId.Value, data);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (emailTargets.ContainsKey(watcher.Entity.Email.ToLower()))
+                        {
+                            WatcherData data = emailTargets[watcher.Entity.Email.ToLower()];
+                            data = targets[data.User.Entity.Id];
+                            data.IssueId.Add(issue.Entity.Id);
+                        }
+                        else
+                        {
+                            WatcherData data = new WatcherData();
+                            data.User = new UserDto(new User());
+                            data.User.Entity.Id = emailWatchers--;
+                            data.User.Entity.Email = watcher.Entity.Email;
+                            data.User.Entity.EmailMe = true;
+                            data.User.Entity.EmailMeMyChanges = true;
+                            data.User.Entity.ProjectGroups.Add(new ProjectGroupMembership() { ProjectGroupId = Constants.GlobalGroupEveryone, UserId = data.User.Entity.Id });
+                            UserSettings settings = new UserSettings();
+                            settings.IndividualFollowerAlerts = true;
+                            data.User.Entity.Settings = settings.ToJson();
+                            var group = new ProjectGroup() { Id = Constants.GlobalGroupEveryone, Members = new List<ProjectGroupMembership>() };
+                            group.Members2.Add(new ProjectGroupMembership() { UserId = data.User.Entity.Id, ProjectGroupId = Constants.GlobalGroupEveryone });
+                            data.User.ProjectGroups.Add(group);
+                            data.IssueId.Add(issue.Entity.Id);
+                            emailTargets.Add(watcher.Entity.Email.ToLower(), data);
+                            targets.Add(data.User.Entity.Id, data);
                         }
                     }
                 }
