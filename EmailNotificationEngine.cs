@@ -164,6 +164,8 @@ namespace EmailAlerts
                         }
                     }
 
+                    // Remove the reported by first entry!
+                    if(issue.History.Count > 0 && issue.History[issue.History.Count-1].Entity.AttributeChanged == ItemAttributeVisibility.ReportedBy) issue.History.RemoveAt(issue.History.Count -1); 
                     issue.ChangeLog = _issueManager.GetChangeLog(issue, _issueManager.UserContext.User, recepient, lastCheckedLocal);
 
                     // Populate model for email template
