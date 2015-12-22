@@ -113,7 +113,7 @@ del $(ProjectDir)$(TargetName).zip
 $(ProjectDir)libs\7za.exe a $(TargetDir)$(TargetName).zip $(ProjectDir)*.dll $(ProjectDir)*.pdb $(ProjectDir)*.manifest 
 
 del $(ProjectDir)$(TargetName).dll
-del $(ProjectDir)$(TargetName).pdb</PostBuildEvent>
+rem del $(ProjectDir)$(TargetName).pdb</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

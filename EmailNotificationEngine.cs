@@ -411,7 +411,8 @@ namespace EmailAlerts
             var userManager = new UserManager(_issueManager);
             List<int> projectsMissingFollowerTemplate = new List<int>();
             int emailWatchers = -3;
-            
+
+            LogDebugMessage(string.Concat("Processing follower - ", issues.Count, " items found"));
             // Build array of users that are watching issues
             foreach (var issue in issues)
             {
@@ -591,7 +592,7 @@ namespace EmailAlerts
                         string log;
 
                         string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
-
+                        LogDebugMessage(string.Concat("Processing follower - Send item ", issue.IssueKey, " to ", recipient.User.Entity.Email));
                         EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Fullname, true, out log);
                     }
                     else
@@ -675,7 +676,7 @@ namespace EmailAlerts
 
                         // Send email
                         string log;
-
+                        LogDebugMessage(string.Concat("Processing follower - Send items ", issuesTemplate.Select(i=> i.IssueKey).ToDelimited(", "), " to ", recipient.User.Entity.Email));
                         EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Entity.Fullname, true, out log);
 
                         if (allTemplateProjects.Count == 0)
