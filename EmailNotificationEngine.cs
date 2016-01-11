@@ -371,14 +371,13 @@ namespace EmailAlerts
 
             LogDebugMessage("Last checked for watched item alerts: " + lastChecked);
 
+            settings.LastCheckedWatchers = DateTime.UtcNow;
+
             List<IssueDto> issues = _issueManager.GetFiltered(filter);
 
             LogDebugMessage("Item that have changed: " + issues.Count);
-
+            
             if (issues.Count > 0) ProcessWatchers(issues, lastChecked);
-
-            settings.LastCheckedWatchers = DateTime.UtcNow;
-            /*serviceManager.Admin.UpdateSchedulerSettings(settings);*/
 
             IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
 
