@@ -141,7 +141,15 @@ namespace EmailAlerts
 
                 foreach (int issueId in issuesToAlert)
                 {
-                    IssueDto issue = _issueManager.Get(issueId);
+                    IssueDto issue = null;
+                    try
+                    {
+                        issue = _issueManager.Get(issueId);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogException(ex);
+                    }
                     
                     // Safety check
                     if (issue == null || issue.Entity.IsNew) continue;
