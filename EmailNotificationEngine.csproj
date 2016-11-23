@@ -107,7 +107,7 @@
 copy $(TargetDir)$(TargetName).dll $(ProjectDir)$(TargetName).dll
 
 del $(ProjectDir)$(TargetName).pdb
-rem copy $(TargetDir)$(TargetName).pdb $(ProjectDir)$(TargetName).pdb
+copy $(TargetDir)$(TargetName).pdb $(ProjectDir)$(TargetName).pdb
 
 del $(ProjectDir)$(TargetName).zip
 $(ProjectDir)libs\7za.exe a $(TargetDir)$(TargetName).zip $(ProjectDir)*.dll $(ProjectDir)*.pdb $(ProjectDir)*.manifest 

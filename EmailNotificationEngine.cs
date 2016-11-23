@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Countersoft.Foundation.Commons.Extensions;
 using Countersoft.Gemini.Commons;
@@ -367,25 +368,30 @@ namespace EmailAlerts
 
         private void ProcessWatcherAlerts()
         {
-            SchedulerSettings settings = _issueManager.UserContext.Config.SchedulerSettings.HasValue() ? _issueManager.UserContext.Config.SchedulerSettings.FromJson<SchedulerSettings>() : new SchedulerSettings();
+            SchedulerSettings settings = _issueManager.UserContext.Config.SchedulerSettings.HasValue() 
+                ? _issueManager.UserContext.Config.SchedulerSettings.FromJson<SchedulerSettings>() 
+                : new SchedulerSettings();
 
-            DateTime lastChecked = settings.LastCheckedWatchers.HasValue ? settings.LastCheckedWatchers.Value : DateTime.UtcNow;
+            DateTime lastChecked = settings.LastCheckedWatchers ?? DateTime.UtcNow;
 
-            IssuesFilter filter = new IssuesFilter();
-
-            filter.RevisedAfter = lastChecked.ToString();
-
-            filter.IncludeClosed = true;
-
-            LogDebugMessage("Last checked for watched item alerts: " + lastChecked);
+            IssuesFilter filter = new IssuesFilter
+            {
+                RevisedAfter = lastChecked.ToString(),
+                IncludeClosed = true
+            };
 
             settings.LastCheckedWatchers = DateTime.UtcNow;
 
-            List<IssueDto> issues = _issueManager.GetFiltered(filter);
+            LogDebugMessage("Last checked for watched item alerts: " + lastChecked + " next check will check from " + settings.LastCheckedWatchers);
 
-            LogDebugMessage("Item that have changed: " + issues.Count);
-            
-            if (issues.Count > 0) ProcessWatchers(issues, lastChecked);
+            List<IssueDto> changedIssues = _issueManager.GetFiltered(filter);
+
+            LogDebugMessage( $"Item that have changed: {changedIssues.Count}");
+
+            if ( changedIssues.Count > 0 )
+            {
+                ProcessWatchers(changedIssues, lastChecked);
+            }
 
             IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
 
@@ -393,12 +399,12 @@ namespace EmailAlerts
 
             config.SchedulerSettings = settings.ToJson();
 
-            ConfigurationItem item = new ConfigurationItem();
-
-            item.SettingId = GeminiConfigurationOption.SchedulerSettings.ToString();
-
-            item.SettingValue = config.SchedulerSettings;
-
+            ConfigurationItem item = new ConfigurationItem
+            {
+                SettingId = GeminiConfigurationOption.SchedulerSettings.ToString(),
+                SettingValue = config.SchedulerSettings
+            };
+            
             configuration.Update(item);
 
             GeminiApp.RefreshConfig(config);
@@ -409,7 +415,41 @@ namespace EmailAlerts
             return history.Find(h => h.Entity.UserId.GetValueOrDefault() != userId) == null;
         }
 
-        private void ProcessWatchers(List<IssueDto> issues, DateTime lastChecked)
+        private string IssueDetail( IssueDto issue )
+        {
+            return $"Item {issue.Title} ({issue.ProjectCode}:{issue.Entity.Id})";
+        }
+
+        private string UserDetail( UserDto user )
+        {
+            if ( user.Fullname.HasValue() )
+            {
+                return $"User {user.Fullname} ";
+            }
+            if ( user.Entity.Username.HasValue() )
+            {
+                return $"User {user.Entity.Username} ";
+            }
+            if ( user.Entity.Email.HasValue() )
+            {
+                return $"User {user.Entity.Email} ";
+            }
+            if ( user.Entity != null )
+            {
+                return $"User {user.Entity.Id}";
+            }
+            return "unknown user";
+        }
+        private string UserDetail( IssueWatcherDto user )
+        {
+            return UserDetail( new UserDto
+            {
+                Entity = new User {Email = user.Email, Username = user.Username, Id = user.Entity.Id},
+                Fullname = user.Fullname
+            } );
+        }
+
+        private void ProcessWatchers(List<IssueDto> changedIssues, DateTime lastChecked)
         {
             var lastCheckedLocal = lastChecked.ToLocal(_issueManager.UserContext.User.TimeZone);
 
@@ -419,14 +459,29 @@ namespace EmailAlerts
             List<int> projectsMissingFollowerTemplate = new List<int>();
             int emailWatchers = -3;
 
-            LogDebugMessage(string.Concat("Processing follower - ", issues.Count, " items found"));
+            LogDebugMessage( $"Processing follower: {changedIssues.Count} items found (" +
+                             $"{changedIssues.Select( i => i.Entity.Id.ToString() ).Aggregate( ( s, s1 ) => s += ", " + s1 )})" );
+
+            List<string> debugInfo = new List<string>();
             // Build array of users that are watching issues
-            foreach (var issue in issues)
+            foreach (var issue in changedIssues)
             {
                 //Safety check
-                if (issue.Watchers.Count == 0) continue;
-                if (issue.Revised == issue.Created) continue;
-                if (issue.Revised.ToUtc(_issueManager.UserContext.User.TimeZone) <= lastChecked) continue;
+                if ( issue.Watchers.Count == 0 )
+                {
+                    debugInfo.Add(IssueDetail(issue) + " did not have any watchers");
+                    continue;
+                }
+                if ( issue.Revised == issue.Created )
+                {
+                    debugInfo.Add( IssueDetail( issue ) + " has just been created" );
+                    continue;
+                }
+                if ( issue.Revised.ToUtc( _issueManager.UserContext.User.TimeZone ) <= lastChecked )
+                {
+                    debugInfo.Add( IssueDetail( issue ) + $" was revised {issue.Revised.ToUtc( _issueManager.UserContext.User.TimeZone )} before last checked {lastChecked}" );
+                    continue;
+                }
 
                 var history = _issueManager.GetHistory(issue);
 
@@ -434,8 +489,12 @@ namespace EmailAlerts
 
                 history.RemoveAll(h => h.Entity.Created <= lastCheckedLocal);
 
+                debugInfo.Add( $"{issue.Entity.Id} has {history.Count} change(s) to be notified to {issue.Watchers.Count} watchers:" );
+                debugInfo.Add( issue.Watchers.Select( s=>s.Fullname ?? s.Username ?? s.Entity.Id.ToString() ).Aggregate((s,s1)=> s += ", " + s1 ) );
+
                 foreach (var watcher in issue.Watchers)
                 {
+                    debugInfo.Add( $"Processing watcher: {UserDetail(watcher)}");
                     if (watcher.Entity.UserId != null)
                     {
                         if (targets.ContainsKey(watcher.Entity.UserId.Value))
@@ -444,9 +503,17 @@ namespace EmailAlerts
 
                             var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
 
-                            if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
+                            if ( !permissionManager.CanSeeItem( issue.Project, issue ) )
+                            {
+                                debugInfo.Add( $"watcher does not have permission to view item {IssueDetail(issue)}");
+                                continue;
+                            }
 
-                            if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id)) continue;
+                            if ( !data.User.Entity.EmailMeMyChanges && IsUserOnlyChange( history, data.User.Entity.Id ) )
+                            {
+                                debugInfo.Add( $"Watcher has opted not to receive their changes, and this issue was changed solely by them");
+                                continue;
+                            }
 
                             data.IssueId.Add(issue.Entity.Id);
                         }
@@ -456,22 +523,36 @@ namespace EmailAlerts
 
                             data.User = userManager.Get(watcher.Entity.UserId.Value);
 
-                            if (data.User.Entity.Active)
+                            if ( data.User.Entity.Active )
                             {
-                                var permissionManager = new PermissionsManager(data.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
+                                var permissionManager = new PermissionsManager( data.User, _types, _permissionSets,
+                                    _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false );
 
-                                if (!permissionManager.CanSeeItem(issue.Project, issue)) continue;
+                                if ( !permissionManager.CanSeeItem( issue.Project, issue ) )
+                                {
+                                    debugInfo.Add( $"watcher does not have permission to view item {IssueDetail( issue )}" );
+                                    continue;
+                                }
 
-                                if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id)) continue;
+                                if ( !data.User.Entity.EmailMeMyChanges && IsUserOnlyChange( history, data.User.Entity.Id ) )
+                                {
+                                    debugInfo.Add( $"Watcher has opted not to receive their changes, and this issue was changed solely by them" );
+                                    continue;
+                                }
 
-                                data.IssueId.Add(issue.Entity.Id);
+                                data.IssueId.Add( issue.Entity.Id );
 
-                                targets.Add(watcher.Entity.UserId.Value, data);
+                                targets.Add( watcher.Entity.UserId.Value, data );
+                            }
+                            else
+                            {
+                                debugInfo.Add( $"User {data.User.Fullname} is not active and therefore will not be sent a notification");
                             }
                         }
                     }
                     else
                     {
+                        debugInfo.Add( $"Email Subscription user {watcher.Entity.Email.ToLower()}");
                         if (emailTargets.ContainsKey(watcher.Entity.Email.ToLower()))
                         {
                             WatcherData data = emailTargets[watcher.Entity.Email.ToLower()];
@@ -481,17 +562,21 @@ namespace EmailAlerts
                         else
                         {
                             WatcherData data = new WatcherData();
-                            data.User = new UserDto(new User());
-                            data.User.Entity.Id = emailWatchers--;
-                            data.User.Entity.Email = watcher.Entity.Email;
-                            data.User.Entity.EmailMe = true;
-                            data.User.Entity.EmailMeMyChanges = true;
-                            data.User.Entity.ProjectGroups.Add(new ProjectGroupMembership() { ProjectGroupId = Constants.GlobalGroupEveryone, UserId = data.User.Entity.Id });
-                            UserSettings settings = new UserSettings();
-                            settings.IndividualFollowerAlerts = true;
+                            data.User = new UserDto( new User() )
+                            {
+                                Entity =
+                                {
+                                    Id = emailWatchers--,
+                                    Email = watcher.Entity.Email,
+                                    EmailMe = true,
+                                    EmailMeMyChanges = true
+                                }
+                            };
+                            data.User.Entity.ProjectGroups.Add(new ProjectGroupMembership { ProjectGroupId = Constants.GlobalGroupEveryone, UserId = data.User.Entity.Id });
+                            UserSettings settings = new UserSettings {IndividualFollowerAlerts = true};
                             data.User.Entity.Settings = settings.ToJson();
-                            var group = new ProjectGroup() { Id = Constants.GlobalGroupEveryone, Members = new List<ProjectGroupMembership>() };
-                            group.Members2.Add(new ProjectGroupMembership() { UserId = data.User.Entity.Id, ProjectGroupId = Constants.GlobalGroupEveryone });
+                            var group = new ProjectGroup { Id = Constants.GlobalGroupEveryone, Members = new List<ProjectGroupMembership>() };
+                            group.Members2.Add(new ProjectGroupMembership { UserId = data.User.Entity.Id, ProjectGroupId = Constants.GlobalGroupEveryone });
                             data.User.ProjectGroups.Add(group);
                             data.IssueId.Add(issue.Entity.Id);
                             emailTargets.Add(watcher.Entity.Email.ToLower(), data);
@@ -500,6 +585,8 @@ namespace EmailAlerts
                     }
                 }
             }
+
+            debugInfo.Add($"------- STEP2 - Now process these change notifications to {targets.Count} people ---------");
 
             AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager));
 
@@ -515,7 +602,7 @@ namespace EmailAlerts
                 {
                     foreach (var kv in originalComments)
                     {
-                        IssueDto issue = issues.Find(i => i.Entity.Id == kv.Key);
+                        IssueDto issue = changedIssues.Find(i => i.Entity.Id == kv.Key);
 
                         // Safety check
                         if (issue == null || issue.Entity.IsNew) continue;
@@ -529,7 +616,11 @@ namespace EmailAlerts
                 var recipient = target.Value;
 
                 // Safety check
-                if (!recipient.User.Entity.EmailMe || recipient.User.Entity.Email.IsEmpty()) continue;
+                if ( !recipient.User.Entity.EmailMe || recipient.User.Entity.Email.IsEmpty() )
+                {
+                    debugInfo.Add( $"{recipient.User.Fullname ?? recipient.User.Entity.Email ?? recipient.User.Entity.Id.ToString()} does not want emails, or has no email address set.");
+                    continue;
+                }
 
                 AlertTypeWatchersTemplateModel model = new AlertTypeWatchersTemplateModel();
 
@@ -541,10 +632,14 @@ namespace EmailAlerts
 
                 foreach (int issueId in recipient.IssueId)
                 {
-                    IssueDto issue = issues.Find(i => i.Entity.Id == issueId);
+                    IssueDto issue = changedIssues.Find(i => i.Entity.Id == issueId);
 
                     // Safety check
-                    if (issue == null || issue.Entity.IsNew) continue;
+                    if ( issue == null || issue.Entity.IsNew )
+                    {
+                        debugInfo.Add($"Issue {issueId} could not be found or is marked as new");
+                        continue;
+                    }
 
                     issue.ChangeLog = _issueManager.GetChangeLog(issue, _issueManager.UserContext.User, recipient.User, lastCheckedLocal);
 
@@ -566,10 +661,15 @@ namespace EmailAlerts
                         }
                     }
 
-                    if (issue.ChangeLog.Count == 0) continue;
+                    if ( issue.ChangeLog.Count == 0 )
+                    {
+                        debugInfo.Add($"{IssueDetail(issue)} does not have any changes from the ChangeLog");
+                        continue;
+                    }
 
                     if (recipient.User.GetSettings().IndividualFollowerAlerts)
                     {
+                        debugInfo.Add( $"{UserDetail(recipient.User)} wants individual email alerts");
                         var template = alerts.FindTemplateForProject(AlertTemplateType.Updated, issue.Entity.ProjectId);
 
                         if (template == null)
@@ -578,38 +678,43 @@ namespace EmailAlerts
                             continue;
                         }
 
-                        var indModel = new AlertTypeIndividualTemplateModel();
-
-                        indModel.GeminiUrl = model.GeminiUrl;
-
-                        indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id);
-
-                        indModel.TheItem = issue;
-
-                        indModel.TheRecipient = recipient.User;
-
-                        indModel.Version = GeminiVersion.Version;
-
-                        indModel.IsNewItem = false;
+                        var indModel = new AlertTypeIndividualTemplateModel
+                        {
+                            GeminiUrl = model.GeminiUrl,
+                            LinkViewItem =NavigationHelper.GetIssueUrl( _issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id ),
+                            TheItem = issue,
+                            TheRecipient = recipient.User,
+                            Version = GeminiVersion.Version,
+                            IsNewItem = false
+                        };
 
                         string html = alerts.GenerateHtml(template, indModel);
 
-                        if (GeminiApp.GeminiLicense.IsFree) html = alerts.AddSignature(html);
+                        if ( GeminiApp.GeminiLicense.IsFree )
+                        {
+                            html = alerts.AddSignature(html);
+                        }
 
                         string log;
 
                         string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
+                        debugInfo.Add( $"Processing follower - Send item {issue.IssueKey} to {recipient.User.Entity.Email}" );
                         LogDebugMessage(string.Concat("Processing follower - Send item ", issue.IssueKey, " to ", recipient.User.Entity.Email));
                         EmailHelper.Send(_issueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Fullname, true, out log);
                     }
                     else
                     {
+                        debugInfo.Add($"{UserDetail(recipient.User)} wants batched emails, added issue {issue.IssueKey} to updated item list");
                         model.TheItemsUpdated.Add(issue);
                     }
                     
                 }
 
-                if (recipient.User.GetSettings().IndividualFollowerAlerts) continue;
+                if ( recipient.User.GetSettings().IndividualFollowerAlerts )
+                {
+                    debugInfo.Add($"Individual Alerts for this user has finished");
+                    continue;
+                }
 
                 // Safety check!
                 if (model.ChangeCount > 0)
@@ -619,13 +724,16 @@ namespace EmailAlerts
                     if (watcherAlertTemplates.Count == 0)
                     {
                         LogDebugMessage("No follower notification template found");
+                        debugInfo.Add( "No follower notification template found" );
                         continue;
                     }
 
                     if (!watcherAlertTemplates.Any(p => p.GetAssociatedProjectValue().IsEmpty()))
                     {
-                        List<Project> allItemProjects = model.TheItemsUpdated.Select(s => s.Project).ToList();
-                        allItemProjects = allItemProjects.Where(s => !watcherAlertTemplates.Any(a => a.GetAssociatedProjects().Contains(s.Id))).ToList();
+                        List<Project> allItemProjects = model.TheItemsUpdated
+                            .Select(item => item.Project)
+                            .Where(project => !watcherAlertTemplates.Any(template => template.GetAssociatedProjects().Contains(project.Id)))
+                            .ToList();
 
                         if (projectsMissingFollowerTemplate.Count > 0)
                         {
@@ -647,7 +755,12 @@ namespace EmailAlerts
 
                         var issuesTemplate = allTemplateProjects.Count == 0 ? model.TheItemsUpdated : model.TheItemsUpdated.FindAll(s => allTemplateProjects.Contains(s.Entity.ProjectId));
 
-                        if (issuesTemplate.Count == 0) continue;
+                        if ( issuesTemplate.Count == 0 )
+                        {
+                            debugInfo.Add($"Issue Template count was zero");
+                            continue;
+                        }
+
 
                         var projectIds = issuesTemplate.Select(s => s.Entity.ProjectId).Distinct();
 
@@ -670,7 +783,7 @@ namespace EmailAlerts
 
                         if (template.Id == 0)
                         {
-                            
+                            debugInfo.Add($"Template id was zero");
                             continue;
                         }
 
@@ -697,6 +810,7 @@ namespace EmailAlerts
                     }
                 }
             }
+            LogDebugMessage( debugInfo.Aggregate( (s1,s2)=> s1 += "\n\r>> " + s2));
         }       
 
         public override void Shutdown()
