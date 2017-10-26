@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Web;
 using Countersoft.Foundation.Commons.Extensions;
 using Countersoft.Gemini;
@@ -22,13 +23,13 @@ namespace EmailNotificationEngine
 {
     public class FollowerNotification : BaseNotification, INotificationAlert
     {
+        public FollowerNotification(NotificationCache cache, IssueManager issueManager) : base(cache, issueManager)
+        {
+        }
+
         protected override void ProcessNotifications()
         {
             ProcessWatcherAlerts();
-        }
-
-        public FollowerNotification(NotificationCache cache, IssueManager issueManager) : base(cache, issueManager)
-        {
         }
 
 
@@ -48,15 +49,27 @@ namespace EmailNotificationEngine
 
             settings.LastCheckedWatchers = DateTime.UtcNow;
 
-            LogDebugMessage("Last checked for watched item alerts: " + lastChecked + " next check will check from " + settings.LastCheckedWatchers);
+            LogDebugMessage("Last checked for watched item alerts: " + lastChecked + " next check will check from " + settings.LastCheckedWatchers + " (the time now)");
 
+            //NOTE - this filter only works on the date, so loads all changed today. - It skips then in processing later, but why not remove them, save the effort.?
             List<IssueDto> changedIssues = IssueManager.GetFiltered(filter);
+            //issue.Revised.ToUtc(IssueManager.UserContext.User.TimeZone) <= lastChecked
+            var changedAfterLastRun = changedIssues.Count(d => d.Revised.ToUtc(IssueManager.UserContext.User.TimeZone) >= lastChecked);
 
-            LogDebugMessage($"Item that have changed: {changedIssues.Count}");
+            LogDebugMessage($"Item that have changed: {changedIssues.Count} (today),  {changedAfterLastRun} since the last run");
 
             if (changedIssues.Count > 0)
             {
-                ProcessWatchers(changedIssues, lastChecked);
+                try
+                {
+                    ProcessWatchers(changedIssues, lastChecked);
+                }
+                catch(Exception ex)
+                {
+                    LogDebugMessage($"There was an error while Processing Followers - {ex.ToString()}");
+                    CloseFile();
+                    throw;
+                }
             }
 
             IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
@@ -72,19 +85,12 @@ namespace EmailNotificationEngine
             };
 
             configuration.Update(item);
+            LogDebugMessage($"Updating scheduler settings, new datetime {settings.LastCheckedWatchers.GetValueOrDefault()}");
 
             GeminiApp.RefreshConfig(config);
         }
 
 
-        private List<string> _log { get; } = new  List<string>();
-        private void DebugMessage(string message, int level = 1)
-        {
-            _log.Add(message);
-            DebugMessageRaised( new NotificationMessageEventArgs(message, level));
-        }
-
-        
         private void ProcessWatchers(List<IssueDto> changedIssues, DateTime lastChecked)
         {
             
@@ -103,22 +109,23 @@ namespace EmailNotificationEngine
             // Build array of users that are watching issues
             foreach (var issue in changedIssues)
             {
+                LogDebugMessage("",2);
                 LogDebugMessage($"Processing {IssueDetail(issue)}", 2);
 
                 //Safety check
                 if (issue.Watchers.Count == 0)
                 {
-                    LogDebugMessage(IssueDetail(issue) + " did not have any watchers", 2);
+                    LogDebugMessage(IssueDetail(issue) + " did not have any watchers, Skipping", 3);
                     continue;
                 }
                 if (issue.Revised == issue.Created)
                 {
-                    LogDebugMessage(IssueDetail(issue) + " has just been created",2);
+                    LogDebugMessage(IssueDetail(issue) + " has just been created, skipping",3);
                     continue;
                 }
                 if (issue.Revised.ToUtc(IssueManager.UserContext.User.TimeZone) <= lastChecked)
                 {
-                    LogDebugMessage(IssueDetail(issue) + $" was revised {issue.Revised.ToUtc(IssueManager.UserContext.User.TimeZone)} before last checked {lastChecked}",2);
+                    LogDebugMessage(IssueDetail(issue) + $" was revised {issue.Revised.ToUtc(IssueManager.UserContext.User.TimeZone)} before last checked {lastChecked}, skipping",3);
                     continue;
                 }
 
@@ -128,12 +135,12 @@ namespace EmailNotificationEngine
 
                 history.RemoveAll(h => h.Entity.Created <= lastCheckedLocal);
 
-                LogDebugMessage($"{issue.Entity.Id} has {history.Count} change(s) to be notified to {issue.Watchers.Count} watchers:",2);
-                LogDebugMessage(issue.Watchers.Select(s => s.Fullname ?? s.Username ?? s.Entity.Id.ToString()).Aggregate((s, s1) => s += ", " + s1),2);
+                LogDebugMessage($"{issue.Entity.Id} has {history.Count} change(s) to be notified to {issue.Watchers.Count} watchers:", 3);
+                LogDebugMessage(issue.Watchers.Select(s => s.Fullname ?? s.Username ?? s.Entity.Id.ToString()).Aggregate((s, s1) => s += ", " + s1), 4);
 
                 foreach (var watcher in issue.Watchers)
                 {
-                    DebugMessage($"Processing watcher: {UserDetail(watcher)}");
+                    LogDebugMessage($"Processing watcher: {UserDetail(watcher)}", 3);
                     if (watcher.Entity.UserId != null)
                     {
                         if (targets.ContainsKey(watcher.Entity.UserId.Value))
@@ -145,17 +152,18 @@ namespace EmailNotificationEngine
 
                             if (!permissionManager.CanSeeItem(issue.Project, issue))
                             {
-                                DebugMessage($"watcher does not have permission to view item {IssueDetail(issue)}");
+                                LogDebugMessage($"watcher does not have permission to view item {IssueDetail(issue)}", 4);
                                 continue;
                             }
 
                             if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id))
                             {
-                                DebugMessage($"Watcher has opted not to receive their changes, and this issue was changed solely by them");
+                                LogDebugMessage($"Watcher has opted not to receive their changes, and this issue was changed solely by them", 4);
                                 continue;
                             }
 
                             data.IssueId.Add(issue.Entity.Id);
+                            LogDebugMessage($"User's notifications include these entities: " + data.IssueId.Cast<string>().Aggregate((s1,s2)=> s1 + ", " + s2));
                         }
                         else
                         {
@@ -171,13 +179,13 @@ namespace EmailNotificationEngine
 
                                 if (!permissionManager.CanSeeItem(issue.Project, issue))
                                 {
-                                    DebugMessage($"watcher does not have permission to view item {IssueDetail(issue)}");
+                                    LogDebugMessage($"watcher does not have permission to view item {IssueDetail(issue)}",4);
                                     continue;
                                 }
 
                                 if (!data.User.Entity.EmailMeMyChanges && IsUserOnlyChange(history, data.User.Entity.Id))
                                 {
-                                    DebugMessage($"Watcher has opted not to receive their changes, and this issue was changed solely by them");
+                                    LogDebugMessage($"Watcher has opted not to receive their changes, and this issue was changed solely by them",4);
                                     continue;
                                 }
 
@@ -187,13 +195,13 @@ namespace EmailNotificationEngine
                             }
                             else
                             {
-                                DebugMessage($"User {data.User.Fullname} is not active and therefore will not be sent a notification");
+                                LogDebugMessage($"User {data.User.Fullname} is not active and therefore will not be sent a notification",4);
                             }
                         }
                     }
                     else
                     {
-                        DebugMessage($"Email Subscription user {watcher.Entity.Email.ToLower()}");
+                        LogDebugMessage($"Email **Subscription** user {watcher.Entity.Email.ToLower()}",4);
                         if (emailTargets.ContainsKey(watcher.Entity.Email.ToLower()))
                         {
                             WatcherData data = emailTargets[watcher.Entity.Email.ToLower()];
@@ -227,7 +235,10 @@ namespace EmailNotificationEngine
                 }
             }
 
+            LogDebugMessage("", 2);
+            LogDebugMessage($"-------------------------------------------------------------------------------",2);
             LogDebugMessage($"------- STEP2 - Now process these change notifications to {targets.Count} people ---------",2);
+            LogDebugMessage($"-------------------------------------------------------------------------------",2);
 
             AlertsTemplateHelper alerts = new AlertsTemplateHelper(Cache.Templates, Cache.BaseUrl);
             //AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager));
@@ -236,8 +247,9 @@ namespace EmailNotificationEngine
             Dictionary<int, List<IssueCommentDto>> originalComments = new Dictionary<int, List<IssueCommentDto>>();
             List<int> processedProjects;
 
-            foreach (var target in targets)
+            foreach (var target in targets) //Users
             {
+                LogDebugMessage($"Processing User {target.Key} {target.Value?.User.Entity?.Username}",2);
                 processedProjects = new List<int>();
 
                 if (originalComments.Count > 0)
@@ -260,7 +272,7 @@ namespace EmailNotificationEngine
                 // Safety check
                 if (!recipient.User.Entity.EmailMe || recipient.User.Entity.Email.IsEmpty())
                 {
-                    LogDebugMessage($"{recipient.User.Fullname ?? recipient.User.Entity.Email ?? recipient.User.Entity.Id.ToString()} does not want emails, or has no email address set.",2);
+                    LogDebugMessage($"{recipient.User.Fullname ?? recipient.User.Entity.Email ?? recipient.User.Entity.Id.ToString()} does not want emails, or has no email address set, skipping.",3);
                     continue;
                 }
 
@@ -279,7 +291,7 @@ namespace EmailNotificationEngine
                     // Safety check
                     if (issue == null || issue.Entity.IsNew)
                     {
-                        LogDebugMessage($"Issue {issueId} could not be found or is marked as new",2);
+                        LogDebugMessage($"Issue {issueId} could not be found or is marked as new, skipping",3);
                         continue;
                     }
 
@@ -300,24 +312,24 @@ namespace EmailNotificationEngine
 
                             issue.Comments = comments;
 
-                            break;
+                            break; //TODO this break is before all the comments added to original comments, so original comments are not complete.
                         }
                     }
 
                     if (issue.ChangeLog.Count == 0)
                     {
-                        LogDebugMessage($"{IssueDetail(issue)} does not have any changes from the ChangeLog",2);
+                        LogDebugMessage($"{IssueDetail(issue)} does not have any changes from the ChangeLog, skipping",3);
                         continue;
                     }
 
                     if (recipient.User.GetSettings().IndividualFollowerAlerts)
                     {
-                        LogDebugMessage($"{UserDetail(recipient.User)} wants individual email alerts",2);
+                        LogDebugMessage($"{UserDetail(recipient.User)} wants individual email alerts", 3);
                         var template = alerts.FindTemplateForProject(AlertTemplateType.Updated, issue.Entity.ProjectId);
 
                         if (template == null)
                         {
-                            LogDebugMessage("No update notification template found");
+                            LogDebugMessage("No update notification template found, skipping",3);
                             continue;
                         }
 
@@ -341,13 +353,14 @@ namespace EmailNotificationEngine
                         string log;
 
                         string subject = template.Options.Subject.HasValue() ? alerts.GenerateHtml(template, indModel, true) : string.Format("[{0}] {1} {2} ({3})", issue.IssueKey, issue.Type, "Updated", issue.Title, issue.IsClosed ? "Closed" : string.Empty);
-                        LogDebugMessage($"Processing follower - Send item {issue.IssueKey} to {recipient.User.Entity.Email}",2);
+                        LogDebugMessage($"Processing follower - Send item {issue.IssueKey} to {recipient.User.Entity.Email}",3);
                         //LogDebugMessage(string.Concat("Processing follower - Send item ", issue.IssueKey, " to ", recipient.User.Entity.Email));
                         EmailHelper.Send(IssueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Fullname, true, out log);
+                        LogDebugMessage($"Sending email to {recipient.User.Entity.Email} ({recipient.User.Entity.Fullname}) - {subject}");
                     }
                     else
                     {
-                        LogDebugMessage($"{UserDetail(recipient.User)} wants batched emails, added issue {issue.IssueKey} to updated item list",2);
+                        LogDebugMessage($"{UserDetail(recipient.User)} wants batched emails, added issue {issue.IssueKey} to updated item list", 3);
                         model.TheItemsUpdated.Add(issue);
                     }
 
@@ -355,7 +368,7 @@ namespace EmailNotificationEngine
 
                 if (recipient.User.GetSettings().IndividualFollowerAlerts)
                 {
-                    LogDebugMessage($"Individual Alerts for this user has finished",2);
+                    LogDebugMessage($"Individual Alerts for this user has finished, moving to next user",2);
                     continue;
                 }
 
@@ -366,7 +379,7 @@ namespace EmailNotificationEngine
 
                     if (watcherAlertTemplates.Count == 0)
                     {
-                        LogDebugMessage("No follower notification template found");
+                        LogDebugMessage("No follower notification template found",1);
                         continue;
                     }
 
@@ -395,33 +408,37 @@ namespace EmailNotificationEngine
                     {
                         var allTemplateProjects = watcherTemplate.GetAssociatedProjects();
 
-                        var issuesTemplate = allTemplateProjects.Count == 0 ? model.TheItemsUpdated : model.TheItemsUpdated.FindAll(s => allTemplateProjects.Contains(s.Entity.ProjectId));
+                        var issueForTemplate = allTemplateProjects.Count == 0 ? model.TheItemsUpdated : model.TheItemsUpdated.FindAll(s => allTemplateProjects.Contains(s.Entity.ProjectId));
 
-                        if (issuesTemplate.Count == 0)
+                        if (issueForTemplate.Count == 0)
                         {
-                            LogDebugMessage($"Issue Template count was zero",2);
+                            LogDebugMessage($"There are no issues for the selected watcher template - {watcherTemplate.Label}",2);
                             continue;
                         }
 
 
-                        var projectIds = issuesTemplate.Select(s => s.Entity.ProjectId).Distinct();
+                        var projectIds = issueForTemplate.Select(s => s.Entity.ProjectId).Distinct();
 
                         if (processedProjects.Count > 0)
                         {
                             projectIds = projectIds.Where(s => !processedProjects.Contains(s));
-                            issuesTemplate = issuesTemplate.Where(s => !processedProjects.Contains(s.Entity.ProjectId)).ToList();
+                            issueForTemplate = issueForTemplate.Where(s => !processedProjects.Contains(s.Entity.ProjectId)).ToList();
                         }
 
-                        if (processedProjects.Contains(0) || projectIds.Count() == 0 || issuesTemplate.Count == 0) continue;
+                        if (processedProjects.Contains(0) || projectIds.Count() == 0 || issueForTemplate.Count == 0)
+                        {
+                            LogDebugMessage($" Processed the all projects, or no issues for the current template {processedProjects.Contains(0)}|{projectIds.Count()}|{issueForTemplate.Count}", 2);
+                            continue;
+                        }
 
                         AlertTypeWatchersTemplateModel projectTemplateModel = new AlertTypeWatchersTemplateModel();
 
-                        projectTemplateModel.TheItemsUpdated.AddRange(issuesTemplate);
+                        projectTemplateModel.TheItemsUpdated.AddRange(issueForTemplate);
                         projectTemplateModel.TheRecipient = model.TheRecipient;
                         projectTemplateModel.Version = model.Version;
                         projectTemplateModel.GeminiUrl = model.GeminiUrl;
 
-                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, issuesTemplate.First().Entity.ProjectId);
+                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, issueForTemplate.First().Entity.ProjectId);
 
                         if (template.Id == 0)
                         {
@@ -438,8 +455,10 @@ namespace EmailNotificationEngine
 
                         // Send email
                         string log;
-                        LogDebugMessage(string.Concat("Processing follower - Send items ", issuesTemplate.Select(i => i.IssueKey).ToDelimited(", "), " to ", recipient.User.Entity.Email));
+                        LogDebugMessage(string.Concat("Processing follower - Send items ", issueForTemplate.Select(i => i.IssueKey).ToDelimited(", "), " to ", recipient.User.Entity.Email));
                         EmailHelper.Send(IssueManager.UserContext.Config, subject, html, recipient.User.Entity.Email, recipient.User.Entity.Fullname, true, out log);
+
+                        LogDebugMessage($"Sending email to {recipient.User.Entity.Email} {recipient.User.Entity.Fullname} - {subject}",3);
 
                         if (allTemplateProjects.Count == 0)
                         {
@@ -452,7 +471,6 @@ namespace EmailNotificationEngine
                     }
                 }
             }
-            LogDebugMessage(_log.Aggregate((s1, s2) => s1 += "\n\r>> " + s2));
         }
 
         private string IssueDetail(IssueDto issue)

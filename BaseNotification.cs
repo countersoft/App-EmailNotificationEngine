@@ -23,6 +23,7 @@ namespace EmailNotificationEngine
                     using (_streamWriter = OpenFile())
                     {
                         ProcessNotifications();
+                        LogDebugMessage($"Finished processing {this.GetType().Name}");
                         CloseFile();
                     }
                 }
@@ -61,7 +62,12 @@ namespace EmailNotificationEngine
                 {
                     OpenFile();
                 }
-                _streamWriter.WriteLine(message);
+                var padding = string.Empty;
+                for (int i = 2; i < level; i++)
+                {
+                    padding += "   ";
+                }
+                _streamWriter.WriteLine(padding + message);
             }
         }
 
@@ -100,12 +106,13 @@ namespace EmailNotificationEngine
         {
             try
             {
+                _streamWriter.WriteLine("Flusing file stream buffer");
                 _streamWriter.Flush();
                 _streamWriter.Close();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // ignored
+                DebugMessageRaised(new NotificationMessageEventArgs("There was an error closing the log file " + ex.ToString()));
             }
         }
 

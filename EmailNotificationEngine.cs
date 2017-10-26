@@ -32,15 +32,6 @@ namespace EmailAlerts
     AppRequiresConfigScreen(true)]
     public class EmailNotificationEngine : TimerJob
     {
-        private List<AlertTemplate> _templates;
-
-        private List<IssueTypeDto> _types;
-
-        private List<PermissionSetDto> _permissionSets;
-
-        private List<Organization> _organizations;
-
-        private IssueManager _issueManager;
 
         public override bool Run(IssueManager issueManager)
         {
