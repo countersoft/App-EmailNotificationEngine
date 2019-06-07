@@ -97,7 +97,13 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AdminSettings.cs" />
+    <Compile Include="BaseNotification.cs" />
+    <Compile Include="FollowerNotification.cs" />
+    <Compile Include="NotificationCache.cs" />
+    <Compile Include="WorkspaceNotification.cs" />
     <Compile Include="EmailNotificationEngine.cs" />
+    <Compile Include="INotificationAlert.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -111,7 +117,7 @@
 copy $(TargetDir)$(TargetName).dll $(ProjectDir)$(TargetName).dll
 
 del $(ProjectDir)$(TargetName).pdb
-rem copy $(TargetDir)$(TargetName).pdb $(ProjectDir)$(TargetName).pdb
+copy $(TargetDir)$(TargetName).pdb $(ProjectDir)$(TargetName).pdb
 
 del $(ProjectDir)$(TargetName).zip
 $(ProjectDir)libs\7za.exe a $(TargetDir)$(TargetName).zip $(ProjectDir)*.dll $(ProjectDir)*.pdb $(ProjectDir)*.manifest 
