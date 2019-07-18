@@ -18,6 +18,7 @@ using Countersoft.Gemini.Mailer;
 using Microsoft.Practices.Unity;
 using Countersoft.Gemini.Extensibility.Apps;
 using Countersoft.Gemini;
+using Countersoft.Gemini.Commons.Dto.System;
 using Countersoft.Gemini.Commons.Entity.Security;
 
 namespace EmailAlerts
@@ -38,6 +39,8 @@ namespace EmailAlerts
 
         private IssueManager _issueManager;
 
+        private List<LanguageDto> _languages;
+
         public override bool Run(IssueManager issueManager)
         {
             if (!issueManager.UserContext.Config.EmailAlertsEnabled) return true;
@@ -55,6 +58,8 @@ namespace EmailAlerts
             _permissionSets = new PermissionSetManager(issueManager).GetAll();
 
             _organizations = new OrganizationManager(issueManager).GetAll();
+
+            _languages = new LanguageManager(issueManager).GetActive();
 
             ProcessAppNavCardAlerts();
 
@@ -103,7 +108,7 @@ namespace EmailAlerts
 
             List<string> individualIssuesEmailedToUsers = new List<string>(50);
 
-            AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager));
+            AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager), _languages);
 
             UserManager userManager = new UserManager(_issueManager);
 
@@ -268,7 +273,9 @@ namespace EmailAlerts
 
                                 if (!indModel.IsNewItem && issue.ChangeLog.Count == 0) continue;
 
-                                var template = alerts.FindTemplateForProject(indModel.IsNewItem ? AlertTemplateType.Created : AlertTemplateType.Updated, issue.Entity.ProjectId);
+                                var template = alerts.FindTemplateForProject(
+                                    indModel.IsNewItem ? AlertTemplateType.Created : AlertTemplateType.Updated, 
+                                    issue.Entity.ProjectId, GetLanguageId(user) );
 
                                 string html = alerts.GenerateHtml(template, indModel);
 
@@ -294,11 +301,13 @@ namespace EmailAlerts
                         var cloneCommented = new List<IssueDto>(model.TheItemsCommented);
 
                         // Find email template to use (for this project or fall back to default template)
-                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.AppNavAlerts, 0);
-
+                        
                         foreach (var user in subscribers)
                         {
-                            if (allOptOuts.Any(s => s.UserId == user.Entity.Id && s.CardId == card.Id && s.OptOutType == OptOutEmails.OptOutTypes.Alert)) continue;
+                            AlertTemplate template = alerts.FindTemplateForProject( AlertTemplateType.AppNavAlerts, 0, GetLanguageId(user) );
+
+
+                            if ( allOptOuts.Any(s => s.UserId == user.Entity.Id && s.CardId == card.Id && s.OptOutType == OptOutEmails.OptOutTypes.Alert)) continue;
 
                             model.TheItemsCreated = new List<IssueDto>(cloneCreated);
 
@@ -500,8 +509,8 @@ namespace EmailAlerts
                     }
                 }
             }
-
-            AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager));
+            var langMan = new LanguageManager(_issueManager);
+            AlertsTemplateHelper alerts = new AlertsTemplateHelper(_templates, GetUrl(_issueManager),_languages);
 
             // Now loop through users sending them watcher summary email
             Dictionary<int, List<IssueCommentDto>> originalComments = new Dictionary<int, List<IssueCommentDto>>();
@@ -545,7 +554,7 @@ namespace EmailAlerts
 
                     // Safety check
                     if (issue == null || issue.Entity.IsNew) continue;
-
+                    
                     issue.ChangeLog = _issueManager.GetChangeLog(issue, _issueManager.UserContext.User, recipient.User, lastCheckedLocal);
 
                     var permissionManager = new PermissionsManager(recipient.User, _types, _permissionSets, _organizations, _issueManager.UserContext.Config.HelpDeskModeGroup, false);
@@ -570,7 +579,8 @@ namespace EmailAlerts
 
                     if (recipient.User.GetSettings().IndividualFollowerAlerts)
                     {
-                        var template = alerts.FindTemplateForProject(AlertTemplateType.Updated, issue.Entity.ProjectId);
+                        var template = alerts.FindTemplateForProject(AlertTemplateType.Updated, 
+                            issue.Entity.ProjectId, GetLanguageId( recipient.User ) );
 
                         if (template == null)
                         {
@@ -666,7 +676,8 @@ namespace EmailAlerts
                         projectTemplateModel.Version = model.Version;
                         projectTemplateModel.GeminiUrl = model.GeminiUrl;
 
-                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, issuesTemplate.First().Entity.ProjectId);
+                        AlertTemplate template = alerts.FindTemplateForProject(AlertTemplateType.Watchers, 
+                            issuesTemplate.First().Entity.ProjectId, GetLanguageId(model.TheRecipient));
 
                         if (template.Id == 0)
                         {
@@ -697,7 +708,17 @@ namespace EmailAlerts
                     }
                 }
             }
-        }       
+        }
+
+        private int? GetLanguageId( UserDto recipient )
+        {
+            var languageCode = recipient.Entity.Language.EnsureValue();
+            var lang = _languages.Find( l => l.Code == languageCode )
+                       ?? _languages.FindAll( l =>
+                               l.Code.StartsWith( languageCode.Substring( 0, languageCode.IndexOf( "-" ) - 1 ) ) )
+                           .FirstOrDefault();
+            return lang == null ? null : new int?( lang.Entity.Id );
+        }
 
         public override void Shutdown()
         {
