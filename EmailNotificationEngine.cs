@@ -15,11 +15,11 @@ using Countersoft.Gemini.Infrastructure.Helpers;
 using Countersoft.Gemini.Infrastructure.Managers;
 using Countersoft.Gemini.Infrastructure.TimerJobs;
 using Countersoft.Gemini.Mailer;
-using Microsoft.Practices.Unity;
 using Countersoft.Gemini.Extensibility.Apps;
 using Countersoft.Gemini;
 using Countersoft.Gemini.Commons.Dto.System;
 using Countersoft.Gemini.Commons.Entity.Security;
+using Unity;
 
 namespace EmailAlerts
 {
