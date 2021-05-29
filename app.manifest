@@ -4,8 +4,8 @@
     <description>Sends email notifications to users</description>
     <version-major>7</version-major>
     <version-minor>0</version-minor>
-    <version-patch>0</version-patch>
+    <version-patch>2</version-patch>
     <publisher>Countersoft</publisher>
-    <released>2020-04-10T09:00:00Z</released>
+    <released>2021-05-26T09:00:00Z</released>
     <debug>false</debug>
 </app>

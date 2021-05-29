@@ -20,6 +20,7 @@ using Countersoft.Gemini;
 using Countersoft.Gemini.Commons.Dto.System;
 using Countersoft.Gemini.Commons.Entity.Security;
 using Unity;
+using System.Text.RegularExpressions;
 
 namespace EmailAlerts
 {
@@ -255,7 +256,7 @@ namespace EmailAlerts
 
                                 indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id);
 
-                                indModel.TheItem = issue;
+                                indModel.TheItem = UpdateIssueLinksForExternalUse(issue);
 
                                 indModel.TheRecipient = user;
 
@@ -372,6 +373,26 @@ namespace EmailAlerts
                 var webNodes = GeminiApp.Container.Resolve<IWebNodes>();
                 webNodes.AddDataOnAllNodesButMe(new WebNodeData() { NodeGuid = GeminiApp.GUID, Key = "cache", Value = navigationCardsManager.Cache.NavigationCards.CacheKey });
             }
+        }
+
+        private IssueDto UpdateIssueLinksForExternalUse( IssueDto issue )
+        {
+            issue.Entity.Description = Regex.Replace( issue.Entity.Description, "href=\"/", "href=\"" + GeminiApp.Config.Url + "/", RegexOptions.IgnoreCase );
+            if(issue.Comments != null)
+            {
+                issue.Comments.ForEach( c =>
+                {
+                    c.Entity.Comment = Regex.Replace( issue.Entity.Description, "href=\"/", "href=\"" + GeminiApp.Config.Url + "/", RegexOptions.IgnoreCase ); 
+                } );
+            }
+            if(issue.CustomFields != null )
+            {
+                //For performance, won't do it on CFs as their not in default templates, clients can replace in their bespoke template if needed
+                //issue.CustomFields
+                //.FindAll( cf => cf.Type == Constants.CUSTOM_FIELD_TYPE_RICHTEXT )
+                //.ForEach( cf => cf.FormattedData = Regex.Replace( issue.Entity.Description, "href=\"/", "href=\"" + GeminiApp.Config.Url + "/", RegexOptions.IgnoreCase ) );
+            }
+            return issue;
         }
 
         private void ProcessWatcherAlerts()
@@ -713,6 +734,11 @@ namespace EmailAlerts
         private int? GetLanguageId( UserDto recipient )
         {
             var languageCode = recipient.Entity.Language.EnsureValue();
+            if ( string.IsNullOrWhiteSpace( languageCode ) || !languageCode.Contains("-"))
+            {
+                base.LogDebugMessage( string.Format( "User {0} does not have a language set", recipient.Entity.Username ) );
+                languageCode = "en-US"; //set the default
+            }
             var lang = _languages.Find( l => l.Code == languageCode )
                        ?? _languages.FindAll( l =>
                                l.Code.StartsWith( languageCode.Substring( 0, languageCode.IndexOf( "-" ) - 1 ) ) )
