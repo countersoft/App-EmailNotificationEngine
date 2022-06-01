@@ -376,7 +376,9 @@ namespace EmailAlerts
 
         private void ProcessWatcherAlerts()
         {
-            SchedulerSettings settings = _issueManager.UserContext.Config.SchedulerSettings.HasValue() ? _issueManager.UserContext.Config.SchedulerSettings.FromJson<SchedulerSettings>() : new SchedulerSettings();
+            IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
+            var inputConfig = configuration.Get();
+            SchedulerSettings settings = inputConfig.SchedulerSettings.HasValue() ? inputConfig.SchedulerSettings.FromJson<SchedulerSettings>() : new SchedulerSettings();
 
             DateTime lastChecked = settings.LastCheckedWatchers.HasValue ? settings.LastCheckedWatchers.Value : DateTime.UtcNow;
 
@@ -395,8 +397,6 @@ namespace EmailAlerts
             LogDebugMessage("Item that have changed: " + issues.Count);
             
             if (issues.Count > 0) ProcessWatchers(issues, lastChecked);
-
-            IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
 
             GeminiConfiguration config = configuration.Get();
 
