@@ -45,6 +45,8 @@ namespace EmailAlerts
         {
             if (!issueManager.UserContext.Config.EmailAlertsEnabled) return true;
 
+            var tokenStore = issueManager.UserContext.Config.SmtpTokenStore;
+
             issueManager.UserContext.User.Entity = new User(issueManager.UserContext.User.Entity);
 
             issueManager.UserContext.User.Entity.Language = "en-US";
@@ -64,6 +66,12 @@ namespace EmailAlerts
             ProcessAppNavCardAlerts();
 
             ProcessWatcherAlerts();
+
+            if (tokenStore != null && tokenStore.Length != 0 && !Enumerable.SequenceEqual(tokenStore, issueManager.UserContext.Config.SmtpTokenStore))
+            {
+                IConfiguration configuration = GeminiApp.Container.Resolve<IConfiguration>();
+                configuration.SaveOAuthToken(issueManager.UserContext.Config.SmtpTokenStore);
+            }
             
             return true;
         }
