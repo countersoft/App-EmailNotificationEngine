@@ -261,7 +261,7 @@ namespace EmailAlerts
 
                                 indModel.GeminiUrl = model.GeminiUrl;
 
-                                indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id);
+                                indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id, null);
 
                                 indModel.TheItem = issue;
 
@@ -600,7 +600,7 @@ namespace EmailAlerts
 
                         indModel.GeminiUrl = model.GeminiUrl;
 
-                        indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id);
+                        indModel.LinkViewItem = NavigationHelper.GetIssueUrl(_issueManager.UserContext, issue.Entity.ProjectId, issue.EscapedProjectCode, issue.Entity.Id, null);
 
                         indModel.TheItem = issue;
 
